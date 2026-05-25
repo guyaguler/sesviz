@@ -35,14 +35,26 @@ export function ExportDialog({ engine, vizRef, onClose }: Props) {
     if (!canvas) return
 
     engine.seek(0)
-    await engine.play()
-    useAppStore.getState().setPlaying(true)
 
+    // Create streams and start the recorder BEFORE playing audio.
+    // canvas.captureStream has 1-2 frames of pipeline latency that the audio
+    // stream does not, so we let the recorder warm up first, then play audio.
     const audioStream = engine.createAudioExportStream()
     const session = startExport(canvas, audioStream, { fps })
     sessionRef.current = session
     setPhase('recording')
     setElapsed(0)
+
+    // Wait 2 rAF frames so captureStream delivers its first frames and the
+    // recorder's internal muxer initialises before audio begins.
+    await new Promise<void>(resolve => {
+      let count = 0
+      const wait = () => { if (++count >= 2) resolve(); else requestAnimationFrame(wait) }
+      requestAnimationFrame(wait)
+    })
+
+    await engine.play()
+    useAppStore.getState().setPlaying(true)
 
     // Poll elapsed from engine.currentTime
     const tick = () => {
